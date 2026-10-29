@@ -1,0 +1,49 @@
+name: Build público Documenso 2.21.1
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_public_build:
+        description: Confirmo este build e a publicação dos artefatos públicos deste repositório separado
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: serena-documenso-build
+  cancel-in-progress: false
+jobs:
+  build:
+    if: inputs.confirm_public_build == true && github.repository == 'knilb13-bot/serena-documenso-build'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Obter somente o commit público disparado
+        env:
+          CI_REPOSITORY: ${{ github.repository }}
+          CI_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$CI_REPOSITORY" = knilb13-bot/serena-documenso-build
+          [[ "$CI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          git init .
+          git remote add origin "https://github.com/$CI_REPOSITORY.git"
+          git -c credential.helper= fetch --depth=1 origin "$CI_COMMIT"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$CI_COMMIT"
+      - name: Compilar sem credenciais de produção e sem rede dentro do builder
+        run: python3 remote_build.py build
+      - name: Publicar somente os artefatos públicos da compilação concluída
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: build-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" \
+            release/documenso-build-public.tar.gz release/build-manifest.json \
+            release/SHA256.json release/build-results.json release/build.log \
+            --target "$GITHUB_SHA" --title "Documenso 2.21.1 - $RELEASE_TAG" \
+            --notes "Compilação pública do commit $GITHUB_SHA. Não publica na VPS e não homologa assinatura, PDF, aparência ou conteúdo contratual."

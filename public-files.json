@@ -1,0 +1,15 @@
+{
+  "schema": "public-package-allowlist-v1",
+  "files": [
+    "README.md",
+    ".github/workflows/build.yml",
+    "remote_build.py",
+    "container-build.mjs",
+    "patches/signing-ui.patch",
+    "patch-manifest.json",
+    "Dockerfile.output",
+    "assets/serena-nobre.png",
+    "public-files.json",
+    "LICENSE"
+  ]
+}

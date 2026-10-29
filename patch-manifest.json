@@ -1,0 +1,70 @@
+{
+  "schema": "serena-documenso-public-build-proposal-v1",
+  "status": "LOCAL_PROPOSAL_NOT_PUBLISHED_OR_RUN",
+  "proposed_repository": "knilb13-bot/serena-documenso-build",
+  "upstream": {
+    "repository": "https://github.com/documenso/documenso",
+    "version": "2.21.1",
+    "commit": "8707e33c124e4b1a68dde92d5e05178c9aabd0be",
+    "archive_url": "https://codeload.github.com/documenso/documenso/tar.gz/8707e33c124e4b1a68dde92d5e05178c9aabd0be",
+    "archive_sha256": "32e46cd9604aadd2864b97900367134ef8a47c4fd5352c2573ab07dd1c8d27f2",
+    "archive_bytes": 58335102,
+    "lock_sha256": "92767f6b48c0710364669c0270015a3d3f4e4b8ebbc00ac931d97041fe4b1fce",
+    "derived_lock_sha256": "9c2d29755f01aa0d002145521c66d55656309c49d5c2bb29daee3363aabdf775"
+  },
+  "runtime": {
+    "base_image": "documenso/documenso@sha256:04ac1003006e1086404e5b3aa9d748e84d8c0fd4cc5ee28938d6face9eb799ec",
+    "node": "v24.22.1",
+    "npm": "11.19.1"
+  },
+  "files": [
+    {
+      "path": "apps/remix/app/root.tsx",
+      "original_sha256": "7fb3efa8874b56ec2780df006991f18eae2fb26521bbb6cbfd1a801863ea0bf6",
+      "patched_sha256": "d5bed958a54fe3765b9559cd12bfea3d996d496aa62cb22c4ca60ac7783a2b78"
+    },
+    {
+      "path": "apps/remix/app/entry.server.tsx",
+      "original_sha256": "7ec5c8cce4a8456c6e357cdbb27d285ff1a5e4c9ad162ba6c734ef51f88a4a72",
+      "patched_sha256": "95ddd96c13f6c1bb005d3c5a5e754a1508a13771b2b8d6afb7fbcbae983ae608"
+    },
+    {
+      "path": "apps/remix/app/utils/recipient-language.ts",
+      "original_sha256": null,
+      "patched_sha256": "16ab479fb88d6374c474b163fe2b2aa4ecbef20a343998d687e3d75c0f5181e8"
+    },
+    {
+      "path": "apps/remix/app/components/general/envelope-signing/envelope-signer-header.tsx",
+      "original_sha256": "56bed9e78a62491fc8c667422d000a6e2db908d4c22c8619cba8663fcd458d7f",
+      "patched_sha256": "3aca496acc31e53f922b065bb19d8da40b22e0d989e573b93a3a7d3a536e629b"
+    },
+    {
+      "path": "apps/remix/app/components/general/document-signing/document-signing-page-view-v2.tsx",
+      "original_sha256": "9f8896546d6e846af28be0030a1882c523d215ee7fb5679dca4e1c79c6ce0b6c",
+      "patched_sha256": "7c50a57208c433b459c6ba2b9740ee79c50f6f7c2f0b682d9eed0d80494ad715"
+    }
+  ],
+  "patch": {
+    "path": "patches/signing-ui.patch",
+    "sha256": "92472ce2b569571df3a8f1242013e39a99ad81594bbe9047a3faa594c0106e3a"
+  },
+  "logo": {
+    "path": "assets/serena-nobre.png",
+    "sha256": "bc164b88ab1e28364ae65d0eb080871758836a5868c16e4dc1146d2cc8d0e920",
+    "bytes": 39926,
+    "width": 374,
+    "height": 125,
+    "origin": "Logo público Serena Nobre já aprovado no piloto"
+  },
+  "proposed_limits": {
+    "memory_bytes": 10737418240,
+    "node_old_space_mib": 8192,
+    "cpus": 2,
+    "pids": 512,
+    "additional_swap_bytes": 0,
+    "workflow_timeout_minutes": 30
+  },
+  "production_data_included": false,
+  "production_credentials_included": false,
+  "build_executed": false
+}

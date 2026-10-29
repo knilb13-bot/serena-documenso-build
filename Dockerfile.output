@@ -1,0 +1,5 @@
+FROM documenso/documenso@sha256:04ac1003006e1086404e5b3aa9d748e84d8c0fd4cc5ee28938d6face9eb799ec
+# Empacotamento futuro somente após build offline e revisão dos artefatos.
+# Sem RUN, dependências, acesso a banco, certificado, configuração ou credenciais.
+COPY --chown=1001:1001 output/build /app/apps/remix/build
+COPY --chown=1001:1001 output/public /app/apps/remix/public
