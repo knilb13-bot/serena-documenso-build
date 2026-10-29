@@ -1,14 +1,14 @@
 # Proposta local de build remoto do piloto
 
-Estado: pacote preparado localmente; repositório, workflow, release e build ainda não criados/executados. Não há prova de compilação concluída ou memória mínima.
+Estado: pacote-base publicado no repositório separado, commit `8e779b5759aff87e82b7377f4b4ef84093ec5e52`. Este estado local contém uma proposta adicional de diagnóstico de registro, ainda não publicada nem executada. Não há prova de compilação concluída ou memória mínima.
 
-O executor proposto é um repositório **público e separado**, `knilb13-bot/serena-documenso-build`, em runner GitHub hospedado `ubuntu-24.04`. Criar esse repositório e publicar este pacote exige consentimento explícito para tornar públicos os cinco patches de UI/idioma, a logomarca pública e os scripts. A revisão desse pacote precede o consentimento e a execução. Nenhum repositório de app/site será reutilizado.
+O executor deste pacote é o repositório **público e separado** já existente, `knilb13-bot/serena-documenso-build`, em runner GitHub hospedado `ubuntu-24.04`. Publicação e execução respeitam a autorização explícita do proprietário e a revisão independente. Este README não amplia essa autorização. Nenhum repositório de app/site será reutilizado.
 
 ## Conteúdo a publicar
 
 Publicar exclusivamente os caminhos de `public-files.json`. Não adicionar diretórios irmãos, histórico de trabalho, `.git` local, relatórios do piloto, AGENTS locais, Vault, PDF, envelope, destinatários, bancos, tokens, chaves ou dados de cliente. A lista não inclui este diretório de verificação local. O archive oficial não precisa entrar no repositório: o runner o obtém por commit fixo e confere SHA-256.
 
-- `.github/workflows/build.yml`: somente `workflow_dispatch`, confirmação explícita, sem cron/push/PR; limite externo total de 30 minutos. Sem Actions checkout ou instalação global.
+- `.github/workflows/build.yml`: build somente por `workflow_dispatch`, confirmação explícita e repositório exato; limite externo total de 30 minutos. O `push` da branch exata `codex/pilot-signing-ui` é uma proposta de diagnóstico de registro: o único job exige explicitamente evento manual e deve ser ignorado no push. Sem cron/PR, Actions checkout ou instalação global.
 - `remote_build.py`: aquisição limitada, validações, controlador dos três contêineres isolados, contexto público e hashes. Sem argumento imprime somente plano. `build` exige o executor CI exato e recusa token no ambiente do passo de build.
 - `container-build.mjs`: funções derivadas do pipeline já revisado; prune, instalação e build offline. Sem SSH, dados ou credenciais do servidor.
 - `patches/signing-ui.patch`: comparação dos cinco arquivos com os bytes do tar oficial fixado. Quatro arquivos substituídos e um helper novo; PDF/envelope/campos/autenticação não fazem parte do patch.
@@ -17,10 +17,18 @@ Publicar exclusivamente os caminhos de `public-files.json`. Não adicionar diret
 - `assets/serena-nobre.png`: mesma logomarca pública aprovada, sem redesenho.
 - `LICENSE`: texto AGPLv3 preservado byte a byte do archive oficial.
 
+## Proposta limitada de diagnóstico de registro
+
+O arquivo manual existe na branch padrão, mas as leituras do registro e a tentativa REST retornaram ausência de workflow. Permissões gerais e a lista de políticas consultadas não explicaram a ausência. A causa continua não comprovada. Acrescentar o evento oficial push é uma experiência diagnóstica proposta, não uma correção demonstrada ou uma exigência documentada do GitHub.
+
+Após revisão independente, uma publicação desta alteração na branch exata pode fazer o GitHub avaliar o arquivo e registrar o workflow ou expor erro de template. O único job possui três condições simultâneas: `github.event_name == 'workflow_dispatch'`, `inputs.confirm_public_build == true` e repositório exato. Em push, a primeira condição é falsa; a configuração deve ignorar o job antes da alocação de runner. Essa propriedade ainda precisa ser observada no GitHub. Não há job diagnóstico, comando de build ou release permitido pelo push.
+
+O diagnóstico fica limitado a uma publicação desta alteração e às leituras do run/registro resultantes. Aceite: registro aparece ou diagnóstico de template permite apontar uma causa; eventual execução do evento push deve ter o único job ignorado, sem runner ou steps executados. Se continuar sem registro/diagnóstico ou aparecer job de push executável, parar e reconciliar. Não repetir push, renomear arquivo, mudar permissões ou adicionar outros eventos por tentativa. Uma compilação real continua exclusivamente manual, limitada à única execução autorizada de até 30 minutos.
+
 ## Execução proposta após autorização
 
-1. Conferir consentimento para o repositório público novo, liberação dos alvos e revisão independente do pacote completo. Criar o repositório sem importar diretórios/histórico alheios; publicar apenas a allowlist e conferir diff/árvore remotos. Não usar `git add -A` no projeto existente.
-2. Disparar manualmente **Build público Documenso 2.21.1**, com `confirm_public_build=true`. O próprio workflow obtém seu commit público exato por git HTTPS, sem gravar token no checkout. O token efêmero do GitHub só é fornecido ao passo final de release, com `contents:write` limitado a esse repositório. Nenhum segredo de VPS/SMTP/banco é cadastrado no CI.
+1. Reconciliar o pacote já publicado com sua baseline e a revisão independente. A proposta diagnóstica muda somente workflow e README públicos; não cria outro repositório nem importa diretórios/histórico alheios. Conferir diff e árvore antes de publicar. Não usar `git add -A` no projeto existente.
+2. Somente depois de confirmar o registro do workflow e as condições da execução autorizada, disparar manualmente **Build público Documenso 2.21.1**, com `confirm_public_build=true`. O próprio workflow obtém seu commit público exato por git HTTPS, sem gravar token no checkout. O token efêmero do GitHub só é fornecido ao passo final de release, com `contents:write` limitado a esse repositório. Nenhum segredo de VPS/SMTP/banco é cadastrado no CI.
 3. O driver baixa o archive `8707e33c124e4b1a68dde92d5e05178c9aabd0be` do GitHub oficial, confere hash `32e46cd9604aadd2864b97900367134ef8a47c4fd5352c2573ab07dd1c8d27f2`, inspeciona todos os nomes e rejeita links/arquivos especiais. Confere os quatro originais e a ausência do helper; aplica o patch e verifica cada hash final. O lock original permanece `92767f6b48c0710364669c0270015a3d3f4e4b8ebbc00ac931d97041fe4b1fce`.
 4. Obtém apenas os dois tarballs de bootstrap fixados no lock: Turbo e plataforma Linux 2.10.5, validando o SRI mais forte. Puxa a imagem `documenso/documenso@sha256:04ac1003006e1086404e5b3aa9d748e84d8c0fd4cc5ee28938d6face9eb799ec`; Node deve ser 24.22.1 e npm 11.19.1. Não instala Node, npm, apk ou ferramenta global.
 5. Faz prune oficial em contêiner offline, usando diretamente o binário Linux. O hash do lock derivado deve permanecer `9c2d29755f01aa0d002145521c66d55656309c49d5c2bb29daee3363aabdf775`; compara versão/URL/SRI de cada dependência com o lock original. A lacuna app-tests não pode entrar na closure. Se divergir, encerra sem alterar locks ou procurar outra versão.

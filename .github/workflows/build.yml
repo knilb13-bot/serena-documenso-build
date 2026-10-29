@@ -1,5 +1,8 @@
 name: Build público Documenso 2.21.1
 on:
+  push:
+    branches:
+      - codex/pilot-signing-ui
   workflow_dispatch:
     inputs:
       confirm_public_build:
@@ -14,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
-    if: inputs.confirm_public_build == true && github.repository == 'knilb13-bot/serena-documenso-build'
+    if: github.event_name == 'workflow_dispatch' && inputs.confirm_public_build == true && github.repository == 'knilb13-bot/serena-documenso-build'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
