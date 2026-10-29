@@ -118,6 +118,47 @@ function packageBin(root,name,binName) {
   return [process.execPath,target];
 }
 
+const PRISMA_GENERATOR_PINS = [
+  {name:'prisma-kysely',version:'2.3.0',target:'dist/bin.js',sha256:'1cb643ab937f099dd6b9f222e180481b7c2bbc0b122035009b5b06a80764b3f3'},
+  {name:'prisma-json-types-generator',version:'3.6.2',target:'index.js',sha256:'b1ed259bbcc3e3f0cc1a1610f8f5a7c1f083286e54c5d72cc7b053502f9091a7'},
+  {name:'zod-prisma-types',version:'3.3.5',target:'dist/bin.js',sha256:'ad54f171e7aa26c6d52667e199aec1826df16d2c5941e454c4fd67e56f9d350a'},
+];
+
+export function inspectPrismaGeneratorPackages(root) {
+  const modules=path.join(root,'node_modules');
+  check(fs.existsSync(modules)&&fs.lstatSync(modules).isDirectory()&&!fs.lstatSync(modules).isSymbolicLink()&&fs.realpathSync(modules).startsWith(fs.realpathSync(root)+path.sep),'node_modules fora da raiz de compilacao');
+  const lockBytes=fs.readFileSync(path.join(root,'package-lock.json'));
+  check(hash(lockBytes)==='9c2d29755f01aa0d002145521c66d55656309c49d5c2bb29daee3363aabdf775','Lock dos generators divergiu');
+  const lock=JSON.parse(lockBytes);
+  return PRISMA_GENERATOR_PINS.map(item=>{
+    const relative='node_modules/'+item.name,folder=path.join(root,relative);
+    check(fs.existsSync(folder)&&fs.lstatSync(folder).isDirectory()&&!fs.lstatSync(folder).isSymbolicLink(),'Pacote generator ausente/invalido: '+item.name);
+    const pkg=json(path.join(folder,'package.json')),locked=lock.packages[relative];
+    check(pkg.name===item.name&&pkg.version===item.version&&pkg.bin?.[item.name]===item.target&&locked?.version===item.version&&locked.bin?.[item.name]===item.target,'Metadata generator divergente: '+item.name);
+    const target=path.join(folder,item.target);
+    check(fs.existsSync(target)&&fs.lstatSync(target).isFile()&&!fs.lstatSync(target).isSymbolicLink()&&fs.realpathSync(target).startsWith(fs.realpathSync(folder)+path.sep),'Target generator ausente/invalido: '+item.name);
+    check(hash(fs.readFileSync(target))===item.sha256,'Target generator alterado: '+item.name);
+    return {name:item.name,version:item.version,bin:'node_modules/.bin/'+item.name,target:relative+'/'+item.target,target_sha256:item.sha256};
+  });
+}
+
+export function generatorSearchPath(root,ambientPath) {
+  check(typeof ambientPath==='string'&&ambientPath.length>0,'PATH de compilacao ausente');
+  return path.join(root,'node_modules','.bin')+path.delimiter+ambientPath;
+}
+
+export function preparePrismaGeneratorPath(root,env) {
+  const proof=inspectPrismaGeneratorPackages(root),binDirectory=path.join(root,'node_modules','.bin');
+  check(fs.existsSync(binDirectory)&&fs.lstatSync(binDirectory).isDirectory()&&!fs.lstatSync(binDirectory).isSymbolicLink(),'Diretorio .bin local ausente/invalido');
+  for(const item of proof) {
+    const bin=path.join(root,item.bin),target=path.join(root,item.target);
+    check(fs.existsSync(bin)&&fs.lstatSync(bin).isSymbolicLink()&&fs.realpathSync(bin)===fs.realpathSync(target),'Bin generator ausente/divergente: '+item.name);
+    if(process.platform==='linux')fs.accessSync(bin,fs.constants.X_OK);
+  }
+  env.PATH=generatorSearchPath(root,env.PATH);
+  return proof.map(item=>({...item,bin_link_verified:true}));
+}
+
 const NATIVE_PUBLIC_PINS = [
   {package:'@documenso/skia-canvas',version:'3.0.8-documenso.3',file:'lib/skia.node',bytes:31538536,sha256:'4492d812e6d50c82e5978922b4a083afde56f97830338881e73eed388973e600',copy:true},
   {package:'@prisma/engines',version:'6.19.3',file:'schema-engine-linux-musl-openssl-3.0.x',bytes:19644784,sha256:'955e3bff1be23248a0922a219f7c4e200acc8fdd1fc72479557c0a9d782bd64a',env:'PRISMA_SCHEMA_ENGINE_BINARY'},
@@ -234,6 +275,8 @@ export function main(stage) {
   const nativePrerequisites=prepareNativePrerequisites(root,env);
   run([...packageBin(root,'patch-package','patch-package'),'--error-on-fail'],root,env);
   run([process.execPath,'--input-type=commonjs','-e',"const skia=require('./node_modules/@documenso/skia-canvas'); const c=new skia.Canvas(1,1); if(c.width!==1)throw Error('skia'); require('./node_modules/esbuild').transformSync('const n=1;', {loader:'js'}); require('./node_modules/sharp'); console.log('native-loaders-ok');"],root,env);
+  const generatorPreflight=preparePrismaGeneratorPath(root,env);
+  console.log(JSON.stringify({prisma_generator_preflight:generatorPreflight}));
   run([...packageBin(root,'prisma','prisma'),'generate','--schema','packages/prisma/schema.prisma'],root,env);
   run([...packageBin(root,'@lingui/cli','lingui'),'compile'],root,env);
   const app=path.join(root,'apps/remix');
@@ -246,7 +289,7 @@ export function main(stage) {
   check(!fs.existsSync('/out/build')&&!fs.existsSync('/out/public'),'Saída existente; não sobrescrever');
   fs.cpSync(path.join(app,'build'),'/out/build',{recursive:true});
   fs.cpSync(path.join(app,'public'),'/out/public',{recursive:true});
-  fs.writeFileSync('/out/build-proof.json',JSON.stringify({network:'none',database_connected:false,lock_sha256:LOCK,source_index_sha256:prune.source_index_sha256,native_prerequisites:nativePrerequisites,build_executed:true,signature_qa:false}));
+  fs.writeFileSync('/out/build-proof.json',JSON.stringify({network:'none',database_connected:false,lock_sha256:LOCK,source_index_sha256:prune.source_index_sha256,native_prerequisites:nativePrerequisites,prisma_generator_preflight:generatorPreflight,build_executed:true,signature_qa:false}));
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) main(process.argv[2]);
