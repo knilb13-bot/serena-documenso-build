@@ -2,6 +2,7 @@
 from pathlib import Path, PurePosixPath
 import argparse
 import base64
+import gzip
 import hashlib
 import json
 import os
@@ -21,6 +22,113 @@ DERIVED = "9c2d29755f01aa0d002145521c66d55656309c49d5c2bb29daee3363aabdf775"
 REPOSITORY = "knilb13-bot/serena-documenso-build"
 CAP = 10 * 1024**3
 DEADLINE = 24 * 60
+MAX_RELEASE_ASSET = 2 * 1024**3
+RUNTIME_CMD = ["sh", "-c", 'export NEXT_PRIVATE_DIRECT_DATABASE_URL="${NEXT_PRIVATE_DIRECT_DATABASE_URL:-$NEXT_PRIVATE_DATABASE_URL}"; HOSTNAME=0.0.0.0 exec node build/server/main.js']
+
+
+def expected_runtime_dockerfile():
+    return ("FROM " + BASE + "\n"
+            "# Empacotamento COPY-only; sem RUN, dependencias ou dados de producao.\n"
+            "COPY --chown=1001:1001 output/build /app/apps/remix/build\n"
+            "COPY --chown=1001:1001 output/public /app/apps/remix/public\n"
+            "# Startup direto: preserva fallback de URL e HOSTNAME; nao executa migrations.\n"
+            "CMD " + json.dumps(RUNTIME_CMD, separators=(",", ":")) + "\n").encode()
+
+
+def remaining_budget(start, clock=time.monotonic):
+    remaining = int(DEADLINE - (clock() - start))
+    need(remaining > 0, "PACKAGING_DEADLINE_EXCEEDED")
+    return remaining
+
+
+def file_proof(path, limit=MAX_RELEASE_ASSET, budget=None):
+    need(path.is_file() and not path.is_symlink(), "ASSET_REGULAR_FILE_REQUIRED")
+    size, digest = 0, hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            if budget:
+                budget()
+            size += len(chunk)
+            need(size < limit, "RELEASE_ASSET_SIZE_LIMIT")
+            digest.update(chunk)
+    return {"bytes": size, "sha256": digest.hexdigest()}
+
+
+def runtime_image_plan(context, image_tag, iidfile):
+    need(re.fullmatch(r"serena-documenso-build:run-[0-9]+-[0-9]+", image_tag), "IMAGE_TAG_INVALID")
+    return ["docker", "build", "--network=none", "--pull=false", "--tag", image_tag,
+            "--iidfile", str(iidfile), "--file", str(context / "Dockerfile"), str(context)]
+
+
+def verify_runtime_image(base, image):
+    need(base.get("Os") == image.get("Os") == "linux" and base.get("Architecture") == image.get("Architecture") == "amd64", "IMAGE_PLATFORM_MISMATCH")
+    need(re.fullmatch(r"sha256:[0-9a-f]{64}", base.get("Id", "")) and re.fullmatch(r"sha256:[0-9a-f]{64}", image.get("Id", "")), "IMAGE_ID_INVALID")
+    need(BASE in base.get("RepoDigests", []), "PINNED_BASE_DIGEST_MISSING")
+    before, after = base.get("Config", {}), image.get("Config", {})
+    need(not before.get("OnBuild"), "BASE_ONBUILD_FORBIDDEN")
+    need(before.get("Entrypoint") in (["docker-entrypoint.sh"], ["/usr/local/bin/docker-entrypoint.sh"]), "BASE_ENTRYPOINT_UNREVIEWED")
+    need(after.get("Entrypoint") == before.get("Entrypoint"), "IMAGE_ENTRYPOINT_CHANGED")
+    need(before.get("WorkingDir") == after.get("WorkingDir") == "/app/apps/remix", "IMAGE_WORKDIR_MISMATCH")
+    need(before.get("User") == "nodejs" and after.get("User") == before.get("User"), "IMAGE_USER_MISMATCH")
+    need(after.get("Cmd") == RUNTIME_CMD, "IMAGE_RUNTIME_CMD_MISMATCH")
+    need(after.get("Env") == before.get("Env"), "IMAGE_ENV_CHANGED")
+    base_layers, image_layers = base.get("RootFS", {}).get("Layers", []), image.get("RootFS", {}).get("Layers", [])
+    need(base_layers and image_layers[:len(base_layers)] == base_layers, "IMAGE_BASE_LAYERS_MISMATCH")
+    need(type(image.get("Size")) is int and image["Size"] > 0, "IMAGE_SIZE_INVALID")
+    return {"image_id": image["Id"], "base_image": BASE, "base_image_id": base["Id"],
+            "image_size_bytes": image["Size"], "runtime_cmd": RUNTIME_CMD,
+            "entrypoint": after["Entrypoint"], "user": after["User"], "workdir": after["WorkingDir"],
+            "base_layers_preserved": True, "migration_command_in_startup": False}
+
+
+def package_runtime_image(area, bundle, files, start, runner=None, disk_free=None, clock=time.monotonic):
+    runner = runner or command
+    budget = lambda: remaining_budget(start, clock)
+    free = disk_free or (lambda: shutil.disk_usage(area).free)
+    dockerfile = ROOT / "Dockerfile.output"
+    need(dockerfile.read_bytes() == expected_runtime_dockerfile(), "RUNTIME_DOCKERFILE_CHANGED")
+    base = json.loads(runner(["docker", "image", "inspect", BASE, "--format", "{{json .}}"], timeout=budget()))
+    need(not base.get("Config", {}).get("OnBuild") and BASE in base.get("RepoDigests", []), "BASE_NOT_READY_FOR_COPY_ONLY")
+    need(type(base.get("Size")) is int and base["Size"] > 0, "BASE_SIZE_INVALID")
+    context_bytes = sum((area / "out" / name).stat().st_size for name in (p.removeprefix("output/") for p in files))
+    need(free() >= base["Size"] + context_bytes + MAX_RELEASE_ASSET + 1024**3, "IMAGE_PACKAGING_DISK_RESERVE_UNPROVEN")
+    context = area / "runtime-context"
+    context.mkdir()
+    (context / "output").mkdir()
+    for name in ("build", "public"):
+        budget()
+        shutil.copytree(area / "out" / name, context / "output" / name)
+    shutil.copyfile(dockerfile, context / "Dockerfile")
+    expected = dict(files)
+    expected["Dockerfile"] = sha(dockerfile.read_bytes())
+    need(tree(context) == expected, "IMAGE_CONTEXT_HASHES_MISMATCH")
+    image_tag = "serena-documenso-build:run-" + os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
+    iidfile = area / "runtime-image.id"
+    runner(runtime_image_plan(context, image_tag, iidfile), timeout=budget())
+    image = json.loads(runner(["docker", "image", "inspect", image_tag, "--format", "{{json .}}"], timeout=budget()))
+    proof = verify_runtime_image(base, image)
+    need(iidfile.read_text().strip() == proof["image_id"], "BUILT_IMAGE_ID_MISMATCH")
+    need(free() >= proof["image_size_bytes"] + MAX_RELEASE_ASSET + 1024**3, "IMAGE_EXPORT_DISK_RESERVE_UNPROVEN")
+    raw = area / "runtime-image.docker-save.tar"
+    runner(["docker", "image", "save", "--output", str(raw), proof["image_id"]], timeout=budget())
+    need(raw.is_file() and not raw.is_symlink() and raw.stat().st_size > 0, "DOCKER_SAVE_OUTPUT_INVALID")
+    artifact = bundle / "documenso-runtime-image.tar.gz"
+    with raw.open("rb") as source, artifact.open("xb") as target:
+        with gzip.GzipFile(fileobj=target, mode="wb", filename="", mtime=0, compresslevel=1) as compressed:
+            while chunk := source.read(1024 * 1024):
+                budget()
+                need(free() >= 1024**3, "IMAGE_EXPORT_DISK_RESERVE_LOST")
+                compressed.write(chunk)
+                need(target.tell() < MAX_RELEASE_ASSET, "RELEASE_ASSET_SIZE_LIMIT")
+    proof.update({"archive": artifact.name, **file_proof(artifact, budget=budget),
+                  "archive_format": "gzip-compressed docker image save archive, loadable by docker image load",
+                  "dockerfile_sha256": sha(dockerfile.read_bytes()), "context_files": expected,
+                  "load_command": ["docker", "image", "load", "--input", artifact.name],
+                  "packaging_network_option": "none", "pull_option": False, "copy_only": True,
+                  "vps_build_required": False, "deployment_executed": False, "runtime_tested": False})
+    save(bundle / "runtime-image-manifest.json", proof)
+    print(json.dumps({"runtime_image_packaged": True, "image_id": proof["image_id"], "sha256": proof["sha256"], "bytes": proof["bytes"], "runtime_tested": False}), flush=True)
+    return proof
 
 
 def need(ok, reason):
@@ -231,11 +339,14 @@ def build():
             tar.add(output / name, arcname="output/" + name, recursive=True)
         tar.add(ROOT / "Dockerfile.output", arcname="Dockerfile")
     need(artifact.stat().st_size < 2 * 1024**3, "RELEASE_ASSET_SIZE_LIMIT")
+    image_proof = package_runtime_image(area, bundle, files, start)
+    index["runtime_image"] = {"manifest": "runtime-image-manifest.json", "image_id": image_proof["image_id"], "archive": image_proof["archive"], "sha256": image_proof["sha256"], "vps_build_required": False}
+    save(bundle / "build-manifest.json", index)
     save(bundle / "build-results.json", {s: read_json(output / (s + "-result.json")) for s in ("prune", "install", "build")})
     logs = [(output / (s + ".log")).read_bytes() for s in ("prune", "install", "build")]
     logs.append((output / "builder.log").read_bytes())
     (bundle / "build.log").write_bytes(b"\n".join(logs))
-    checksums = {p.name: sha(p.read_bytes()) for p in bundle.iterdir() if p.is_file()}
+    checksums = {p.name: file_proof(p, budget=lambda: remaining_budget(start))["sha256"] for p in bundle.iterdir() if p.is_file()}
     save(bundle / "SHA256.json", checksums)
     print(json.dumps({"built": True, "released": False, "deployed": False, "artifact_sha256": checksums[artifact.name]}))
 

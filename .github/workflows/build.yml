@@ -48,5 +48,6 @@ jobs:
           gh release create "$RELEASE_TAG" \
             release/documenso-build-public.tar.gz release/build-manifest.json \
             release/SHA256.json release/build-results.json release/build.log \
+            release/documenso-runtime-image.tar.gz release/runtime-image-manifest.json \
             --target "$GITHUB_SHA" --title "Documenso 2.21.1 - $RELEASE_TAG" \
             --notes "Compilação pública do commit $GITHUB_SHA. Não publica na VPS e não homologa assinatura, PDF, aparência ou conteúdo contratual."

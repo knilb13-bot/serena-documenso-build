@@ -72,6 +72,7 @@ function indexTree(root) {
   visit(root);return result;
 }
 export function copyRootBuildFiles(source,root) {
+  const recovered=[];
   function copy(relative) {
     const from=path.join(source,relative),to=path.join(root,relative),stat=fs.lstatSync(from);
     check(!stat.isSymbolicLink(),'Link inesperado nos arquivos raiz do build');
@@ -81,11 +82,32 @@ export function copyRootBuildFiles(source,root) {
       for(const name of fs.readdirSync(from))copy(path.join(relative,name));
     } else {
       check(stat.isFile(),'Arquivo raiz inesperado');
-      if(fs.existsSync(to))check(fs.lstatSync(to).isFile()&&!fs.lstatSync(to).isSymbolicLink()&&hash(fs.readFileSync(to))===hash(fs.readFileSync(from)),'Arquivo raiz divergente no prune');
-      else {fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to,fs.constants.COPYFILE_EXCL);}
+      if(fs.existsSync(to)) {
+        check(fs.lstatSync(to).isFile()&&!fs.lstatSync(to).isSymbolicLink(),'Destino raiz inesperado: '+relative);
+        const original=fs.readFileSync(from),existing=fs.readFileSync(to),originalHash=hash(original),existingHash=hash(existing);
+        if(existingHash!==originalHash) {
+          // Turbo 2.10.5 reserializa este JSON; restaurar só o par já auditado.
+          check(relative==='turbo.json'&&originalHash==='9b4242cff9e26533fffec58b29ece409ba027f3cec6fa3d1e037a6dd951643fd'&&existingHash==='fcc59601f1ceecc124b943e096e58cfccea79bcdfb5e8c451bd34d65ef878b55','Arquivo raiz divergente no prune: '+relative+'; source_sha256='+originalHash+'; derived_sha256='+existingHash);
+          const backupDirectory=path.join(path.dirname(root),'prune-root-recovery-backup');
+          fs.mkdirSync(backupDirectory,{mode:0o700});
+          fs.writeFileSync(path.join(backupDirectory,'turbo.derived.json'),existing,{flag:'wx'});
+          const descriptor=fs.openSync(to,fs.constants.O_RDWR|(fs.constants.O_NOFOLLOW??0));
+          try {
+            check(fs.fstatSync(descriptor).isFile(),'Turbo não é arquivo regular');
+            check(hash(fs.readFileSync(descriptor))===existingHash,'Turbo mudou antes da restauração');
+            fs.writeSync(descriptor,original,0,original.length,0);
+            fs.ftruncateSync(descriptor,original.length);
+            fs.fsyncSync(descriptor);
+          } finally {fs.closeSync(descriptor);}
+          check(hash(fs.readFileSync(to))===originalHash,'Restauração do Turbo não confirmada');
+          recovered.push({file:relative,before_sha256:existingHash,after_sha256:originalHash,backup:'prune-root-recovery-backup/turbo.derived.json'});
+          console.log(JSON.stringify({prune_root_recovery:recovered[recovered.length-1]}));
+        }
+      } else {fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to,fs.constants.COPYFILE_EXCL);}
     }
   }
   for(const relative of ['.gitignore','lingui.config.ts','turbo.json','patches'])copy(relative);
+  return recovered;
 }
 function packageBin(root,name,binName) {
   const folder=path.join(root,'node_modules',name),pkg=json(path.join(folder,'package.json'));
@@ -179,10 +201,10 @@ export function main(stage) {
     const proof=verifyPrunedLock(json('/src/package-lock.json'),JSON.parse(derived));
     fs.cpSync('/work/pruned/full',root,{recursive:true,errorOnExist:true,force:false});
     fs.cpSync('/work/pruned/json',root,{recursive:true,force:true});
-    copyRootBuildFiles('/src',root);
+    const rootFileRecovery=copyRootBuildFiles('/src',root);
     fs.writeFileSync(root+'/package-lock.json',derived);
     fs.writeFileSync('/out/pruned-package-lock.json',derived);
-    fs.writeFileSync('/out/prune-proof.json',JSON.stringify({...proof,files:indexTree(root),source_index_sha256:hash(fs.readFileSync('/work/source-index.json')),derived_lock_sha256:hash(derived),network:'none'}));
+    fs.writeFileSync('/out/prune-proof.json',JSON.stringify({...proof,root_file_recovery:rootFileRecovery,files:indexTree(root),source_index_sha256:hash(fs.readFileSync('/work/source-index.json')),derived_lock_sha256:hash(derived),network:'none'}));
     return;
   }
   const prune=json('/out/prune-proof.json');
